@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+const robotsTxt = `User-agent: *
+Disallow: /`
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -38,7 +41,13 @@ func run() error {
 		io.WriteString(rw, hostname)
 	})
 	mux.HandleFunc("/ping", func(rw http.ResponseWriter, r *http.Request) {
-		io.WriteString(rw, "ok")
+		rw.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/favicon.ico", func(rw http.ResponseWriter, r *http.Request) {
+		rw.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/robots.txt", func(rw http.ResponseWriter, r *http.Request) {
+		io.WriteString(rw, robotsTxt)
 	})
 
 	handler := RequestLog(os.Stderr, mux)
@@ -60,14 +69,18 @@ func RequestLog(out io.Writer, next http.Handler) http.Handler {
 			host = r.Host
 		}
 
-		remoteAddr, _, err := net.SplitHostPort(r.RemoteAddr)
+		upstreamAddr, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
-			remoteAddr = r.RemoteAddr
+			upstreamAddr = r.RemoteAddr
+		}
+		remoteAddr := r.Header.Get("X-Forwarded-For")
+		if remoteAddr == "" {
+			remoteAddr = upstreamAddr
 		}
 
 		fmt.Fprintf(
 			out,
-			"ts=%s method=%s host=%s uri=%s proto=%s status=%v ip=%s ua=%s ref=%s dur=%s\n",
+			"ts=%s method=%s host=%s uri=%s proto=%s status=%v remote_addr=%s upstream_addr=%s ua=%s ref=%s duration=%s\n",
 			start.Format(time.RFC3339),
 			r.Method,
 			host,
@@ -75,6 +88,7 @@ func RequestLog(out io.Writer, next http.Handler) http.Handler {
 			r.Proto,
 			w.status,
 			remoteAddr,
+			upstreamAddr,
 			strconv.Quote(r.UserAgent()),
 			strconv.Quote(r.Referer()),
 			rtime,
